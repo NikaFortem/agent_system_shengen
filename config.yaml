@@ -1,0 +1,29 @@
+# Провайдер и модель меняются здесь, код не трогаем.
+# provider: mock | gigachat | openai
+#   mock      — заглушка без сети и ключей (детерминированные вызовы, для отладки и демо)
+#   gigachat  — GigaChat API (основной провайдер курса), ключ в .env: GIGACHAT_AUTH_KEY
+#   openai    — любой OpenAI-совместимый API (OpenAI, OpenRouter, vLLM, Ollama), ключ в .env: OPENAI_API_KEY
+provider: mock
+
+models:
+  gigachat: GigaChat-2-Max
+  openai: gpt-4o-mini
+  mock: mock
+
+openai:
+  base_url: null          # например https://openrouter.ai/api/v1 ; null = api.openai.com
+
+gigachat:
+  scope: GIGACHAT_API_PERS
+  verify_ssl: false       # у GigaChat сертификат НУЦ Минцифры; true, если он установлен в системе
+
+agent:
+  max_steps: 6            # лимит шагов цикла агента
+  tool_timeout_s: 5       # таймаут вызова инструмента
+  max_tool_retries: 1     # сколько раз агенту разрешено повторить инструмент после сбоя
+
+data:
+  cases: data/cases.json
+  ec_stats: data/ec_consulates_russia_2025.csv
+  calendar_dir: out/calendar
+  audit_log: out/audit.log
