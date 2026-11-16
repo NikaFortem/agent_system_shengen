@@ -5,6 +5,7 @@ streamlit run app.py
 import json
 from datetime import date
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -53,14 +54,23 @@ with tab_dash:
     k3.metric("Кейсов из чата", len(cases))
     k4.metric("Медиана рассмотрения (все)", f"{cases.processing_days.median():.0f} дн.")
 
+    def hbar(data, value_col, title):
+        """Горизонтальные столбцы по убыванию. Простые имена полей: точки и запятые ломают Vega-Lite."""
+        d = pd.DataFrame({"country": data["Страна"], "value": pd.to_numeric(data[value_col], errors="coerce")}).dropna()
+        return (alt.Chart(d).mark_bar(color="#5b8def")
+                .encode(x=alt.X("value:Q", title=title), y=alt.Y("country:N", sort="-x", title=None),
+                        tooltip=[alt.Tooltip("country:N", title="Страна"), alt.Tooltip("value:Q", title=title)])
+                .properties(height=alt.Step(34)))          # фиксированная высота строки — подписи не прячутся
+
     c1, c2 = st.columns(2)
     with c1:
         st.subheader("Доля отказов, % (ЕК 2025)")
-        st.bar_chart(df[df["Заявлений 2025"] > 1000].set_index("Страна")["Отказов, %"], horizontal=True)
+        st.altair_chart(hbar(df[df["Заявлений 2025"] > 1000], "Отказов, %", "Отказов, %"), width="stretch")
+        st.caption("Страны с числом заявлений из РФ больше 1000.")
     with c2:
         st.subheader("Медиана рассмотрения, дней (чат)")
-        st.bar_chart(df.dropna(subset=["Медиана рассмотрения, дн."]).set_index("Страна")["Медиана рассмотрения, дн."],
-                     horizontal=True)
+        st.altair_chart(hbar(df, "Медиана рассмотрения, дн.", "Дней"), width="stretch")
+        st.caption("Только страны, где в чате не меньше 5 кейсов со сроком.")
     st.subheader("Сводная таблица")
     st.dataframe(df, hide_index=True, width="stretch")
 
@@ -79,8 +89,11 @@ with tab_chat:
     st.caption(f"Провайдер: **{cfg['provider']}** ({cfg['models'][cfg['provider']]}) — меняется в config.yaml")
     with st.sidebar:
         st.subheader("Отладка: подмена сбоев")
+        if st.session_state.pop("reset_fault", False):
+            st.session_state.fault = "нет"              # сбой действует только на один вопрос
         fault = st.selectbox("Сбой для следующего вопроса", ["нет", "get_country_metrics: timeout ×1",
-                                                              "get_country_metrics: timeout ×2"])
+                                                              "get_country_metrics: timeout ×2"], key="fault")
+        st.caption("После вопроса переключатель сам вернётся в «нет».")
     if "agent" not in st.session_state:
         st.session_state.trace = []
         st.session_state.agent = Agent(cfg, Session(user_id="web_user", today=date.today()),
@@ -98,6 +111,8 @@ with tab_chat:
             st.session_state.history.append(("assistant", ans))
         except PendingConfirmation as p:
             st.session_state.pending = p.card
+            st.session_state.trace.append(("confirm_card_shown", f"{p.card['country']}, вылет {p.card['trip_start']}",
+                                           "действие ждёт нажатия кнопки, модель его выполнить не может"))
         st.rerun()
 
     if st.session_state.pending:
@@ -108,14 +123,18 @@ with tab_chat:
             st.table(pd.DataFrame(card["events"]).rename(columns={"date": "Дата", "title": "Событие"}))
             b1, b2 = st.columns(2)
             if b1.button("✅ Добавить", width="stretch"):
+                st.session_state.trace.append(("confirm_decision", "пользователь нажал «Добавить»"))
                 handle(lambda: agent.resume(True))
             if b2.button("✖ Отмена", width="stretch"):
+                st.session_state.trace.append(("confirm_decision", "пользователь нажал «Отмена»"))
                 handle(lambda: agent.resume(False))
 
     if q := st.chat_input("Например: лечу в Испанию 2027-03-20, когда подавать?", disabled=bool(st.session_state.pending)):
         tools.FAULTS.clear()
         if fault != "нет":
             tools.FAULTS["get_country_metrics"] = ["timeout"] * (1 if "×1" in fault else 2)
+            st.session_state.trace.append(("fault_injected", fault))
+            st.session_state.reset_fault = True
         st.session_state.history.append(("user", q))
         handle(lambda: agent.ask(q))
 

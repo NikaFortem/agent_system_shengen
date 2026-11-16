@@ -71,7 +71,10 @@ class MockProvider:
         name = last["name"]
         if name == "get_country_metrics":
             p, ec = res["processing_days"], res.get("ec_2025") or {}
-            return {"content": f"{res['country']}{', ' + res['city'] if res['city'] else ''}: по {p['cases']} кейсам из чата "
+            widened = any(m["role"] == "tool" and '"insufficient_data"' in m["content"]
+                          for m in messages[-4:-1])
+            note = "По запрошенному городу данных мало, поэтому показываю по всей стране за год. " if widened else ""
+            return {"content": note + f"{res['country']}{', ' + res['city'] if res['city'] else ''}: по {p['cases']} кейсам из чата "
                                f"за {res['period_days']} дн. медиана рассмотрения {p['median']:.0f} дн. (обычно {p['p25']:.0f}–{p['p75']:.0f}). "
                                f"По статистике ЕК за 2025: отказов {ec.get('refusal_rate_pct')}%, мультивиз {ec.get('multi_entry_share_pct')}% "
                                f"(до запрета мультивиз в ноябре 2025 — сейчас дают в основном однократные).", "tool_calls": []}

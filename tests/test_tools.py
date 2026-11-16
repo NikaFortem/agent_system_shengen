@@ -201,3 +201,12 @@ def test_dotenv_inline_comment(tmp_path, monkeypatch):
     monkeypatch.delenv("GIGACHAT_AUTH_KEY", raising=False)
     config._load_dotenv(env)
     assert config.os.environ["GIGACHAT_AUTH_KEY"] == "abc=="
+
+
+def test_widened_scope_is_reported(cfg, session):
+    a = Agent(cfg, session, provider=MockProvider())
+    answer = a.ask("Сколько рассматривают визу в Венгрию в Петербурге?")
+    metrics = [m for m in a.messages if m["role"] == "tool"]
+    assert '"insufficient_data"' in metrics[0]["content"] and "по всей стране" in metrics[0]["content"]
+    assert "вся страна" in metrics[-1]["content"]          # scope в результате
+    assert "по всей стране" in answer

@@ -124,8 +124,10 @@ def get_country_metrics(a: GetCountryMetrics, s: Session, store: VisaStore):
     if st["n"] < MIN_CASES:
         raise ToolError("insufficient_data",
                         f"Мало кейсов для {COUNTRY_RU[a.country]}{', ' + a.city if a.city else ''}: {st['n']} (нужно ≥{MIN_CASES})",
-                        "Сам повтори вызов с period_days=365 и без city, не спрашивая пользователя")
-    return {"country": COUNTRY_RU[a.country], "city": a.city, "period_days": a.period_days,
+                        "Сам повтори вызов с period_days=365 и без city, не спрашивая пользователя. "
+                        "В ответе обязательно скажи, что по запрошенному городу данных нет и цифры даны по всей стране")
+    scope = (f"только {a.city}" if a.city else "вся страна, все города подачи") + f", последние {a.period_days} дн."
+    return {"country": COUNTRY_RU[a.country], "city": a.city, "period_days": a.period_days, "scope": scope,
             "processing_days": {"median": st["median"], "p25": st["p25"], "p75": st["p75"], "cases": st["n"]},
             "ec_2025": store.ec_stats(a.country, a.city if a.city in ("Москва", "Санкт-Петербург") else None),
             "sources": "кейсы @schengen_chat (#статистика); статистика Еврокомиссии по консульствам за 2025"}

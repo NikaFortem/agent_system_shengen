@@ -14,7 +14,7 @@ pip install -r requirements.txt
 python demo.py            # 6 сценариев демо (провайдер из config.yaml, по умолчанию mock)
 python cli.py             # консольный чат; python cli.py --fault get_country_metrics:timeout
 streamlit run app.py      # дашборд + чат с карточкой подтверждения
-pytest -q                 # 27 тестов: схема, ошибки, подтверждение, таймауты, лимит шагов, адаптер GigaChat
+pytest -q                 # 28 тестов: схема, ошибки, подтверждение, таймауты, лимит шагов, адаптер GigaChat
 ```
 
 Смена провайдера — только в `config.yaml` (`provider: mock | gigachat | openai`), код не меняется.
