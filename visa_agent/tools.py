@@ -49,19 +49,22 @@ class GetCountryMetrics(BaseModel):
 медиану и разброс срока рассмотрения в днях по кейсам из чата за последние `period_days` дней \
 и долю отказов и мультивиз по официальной статистике Еврокомиссии за 2025 год. Используй, когда \
 пользователь спрашивает «сколько рассматривают», «часто ли отказывают», «куда проще подаваться». \
-Цифры считает код, не пересчитывай их сам. Если кейсов меньше 5, вернётся ошибка insufficient_data."""
+Цифры считает код, не пересчитывай их сам. Не используй, чтобы посчитать, когда подавать документы, — для этого add_visa_timeline_to_calendar. Если кейсов меньше 5, вернётся ошибка insufficient_data — тогда сам повтори вызов с period_days=365 и без city."""
     country: Country = Field(description="Страна Шенгена, ISO-код")
     city: Optional[City] = Field(None, description="Город подачи в России, если пользователь его назвал")
-    period_days: int = Field(180, ge=30, le=365, description="За сколько последних дней брать кейсы, 30–365")
+    period_days: Literal[90, 180, 365] = Field(
+        180, description="За сколько последних дней брать кейсы: 90, 180 или 365. По умолчанию 180; "
+                         "90 — только если пользователь прямо просит последние месяцы")
 
 
 class AddVisaTimelineToCalendar(BaseModel):
-    """ДЕЙСТВИЕ. Рассчитать визовый план к дате вылета и добавить события в календарь пользователя \
-(.ics): когда открывается подача (−180 дней), когда начинать ловить запись, крайний срок подачи \
-(медиана рассмотрения по стране + 10 дней запаса, но не позже чем за 15 дней до вылета) и ожидаемую \
-дату решения. Выполняется только после подтверждения пользователем карточки с датами. Используй, \
-когда пользователь назвал страну и дату поездки и спрашивает, когда подавать, или просит план/напоминания. \
-Если по срокам уже не успеть, вернётся ошибка too_late с подсказкой."""
+    """Рассчитать визовый план к дате вылета: когда открывается подача (−180 дней), когда начинать ловить \
+запись, крайний срок подачи (медиана рассмотрения по стране + 10 дней запаса, но не позже чем за 15 дней \
+до вылета) и ожидаемую дату решения. ВСЕГДА используй этот инструмент, когда пользователь назвал дату \
+поездки и спрашивает, когда подавать документы, — даже если про календарь он не говорил. Сам даты не \
+вычисляй. Пользователь увидит план на карточке и сам решит, добавлять ли его в календарь (.ics); если \
+откажется, план всё равно вернётся в поле plan — перескажи его. Если по срокам уже не успеть, вернётся \
+ошибка too_late с подсказкой — перескажи её. Перед вызовом не нужно вызывать get_country_metrics."""
     country: Country = Field(description="Страна Шенгена, ISO-код")
     city: Optional[City] = Field(None, description="Город подачи в России, если назван")
     trip_start: str = Field(description="Дата вылета, формат YYYY-MM-DD")
@@ -121,7 +124,7 @@ def get_country_metrics(a: GetCountryMetrics, s: Session, store: VisaStore):
     if st["n"] < MIN_CASES:
         raise ToolError("insufficient_data",
                         f"Мало кейсов для {COUNTRY_RU[a.country]}{', ' + a.city if a.city else ''}: {st['n']} (нужно ≥{MIN_CASES})",
-                        "Увеличь period_days до 365 или убери город; доля отказов есть в статистике ЕК")
+                        "Сам повтори вызов с period_days=365 и без city, не спрашивая пользователя")
     return {"country": COUNTRY_RU[a.country], "city": a.city, "period_days": a.period_days,
             "processing_days": {"median": st["median"], "p25": st["p25"], "p75": st["p75"], "cases": st["n"]},
             "ec_2025": store.ec_stats(a.country, a.city if a.city in ("Москва", "Санкт-Петербург") else None),
@@ -172,11 +175,13 @@ def add_visa_timeline_to_calendar(a, s, store, cfg):
     key = f"{s.user_id}_{a.country}_{a.trip_start}"          # ключ идемпотентности
     path = os.path.join(cfg["data"]["calendar_dir"], f"{key}.ics")
     if os.path.exists(path):
-        return {"status": "already_exists", "file": path, "message": "Этот план уже добавлен, дубли не создаём"}
+        return {"status": "already_exists", "file": path, "events": plan["events"],
+                "message": "Этот план уже был в календаре, дубль не создан. Даты — в events, других дат не называй"}
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         f.write(_ics(plan["events"], key))
-    return {"status": "added", "file": path, "events": plan["events"]}
+    return {"status": "added", "file": path, "events": plan["events"],
+            "message": "План добавлен. Перескажи даты из events, других дат не называй"}
 
 
 IMPL = {"search_visa_cases": search_visa_cases, "get_country_metrics": get_country_metrics}
@@ -220,7 +225,7 @@ def execute_tool(name: str, raw_args, session: Session, store: VisaStore, cfg: d
     if FAULTS.get(name):
         kind = FAULTS[name].pop(0)
         _audit(cfg, {"tool": name, "args": raw_args, "user": session.user_id, "fault": kind})
-        return err(kind, f"{name}: сервис не ответил ({kind}, тест)", "Можно повторить один раз, иначе честно сообщи пользователю")
+        return err(kind, f"{name}: сервис не ответил ({kind}, тест)", "Повтор уже был. Не выдумывай цифры: честно скажи, что сервис сейчас недоступен")
     # 5. действие — только после подтверждения конкретных параметров человеком
     if TOOLS[name]["kind"] == "action":
         try:
@@ -229,7 +234,7 @@ def execute_tool(name: str, raw_args, session: Session, store: VisaStore, cfg: d
             return e.payload
         if confirm is None or not confirm(name, card):
             _audit(cfg, {"tool": name, "args": raw_args, "user": session.user_id, "result": "cancelled"})
-            return {"cancelled": True, "message": "Пользователь не подтвердил действие"}
+            return {"cancelled": True, "message": "Пользователь не добавил план в календарь", "plan": card}
         fn = lambda: add_visa_timeline_to_calendar(args, session, store, cfg)
     else:
         fn = lambda: IMPL[name](args, session, store)
@@ -239,7 +244,7 @@ def execute_tool(name: str, raw_args, session: Session, store: VisaStore, cfg: d
         result = ex.submit(fn).result(timeout=cfg["agent"]["tool_timeout_s"])
     except cf.TimeoutError:
         result = err("timeout", f"{name}: сервис не ответил за {cfg['agent']['tool_timeout_s']} с",
-                     "Можно повторить один раз, иначе честно сообщи пользователю")
+                     "Повтор уже был. Не выдумывай цифры: честно скажи, что сервис сейчас недоступен")
     except ToolError as e:
         result = e.payload
     except Exception as e:  # noqa: BLE001 — стек в контекст модели не отдаём

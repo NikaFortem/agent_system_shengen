@@ -1,4 +1,5 @@
 import os
+import re
 from pathlib import Path
 
 import yaml
@@ -15,6 +16,7 @@ def _load_dotenv(path: Path) -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         k, v = line.split("=", 1)
+        v = re.split(r"\s+#", v, maxsplit=1)[0]          # «KEY=value   # комментарий»
         os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 

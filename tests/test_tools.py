@@ -104,7 +104,7 @@ ARGS = {"country": "ES", "trip_start": "2027-03-20"}
 
 def test_action_needs_confirmation(session, store, cfg):
     r = run("add_visa_timeline_to_calendar", ARGS, session, store, cfg, confirm=lambda *_: False)
-    assert r == {"cancelled": True, "message": "Пользователь не подтвердил действие"}
+    assert r["cancelled"] is True and len(r["plan"]["events"]) == 4      # план есть, но ничего не записано
     assert not os.path.exists(cfg["data"]["calendar_dir"])
 
 
@@ -125,7 +125,7 @@ def test_action_idempotent(session, store, cfg):
     yes = lambda *_: True
     run("add_visa_timeline_to_calendar", ARGS, session, store, cfg, confirm=yes)
     r = run("add_visa_timeline_to_calendar", ARGS, session, store, cfg, confirm=yes)
-    assert r["status"] == "already_exists"
+    assert r["status"] == "already_exists" and len(r["events"]) == 4   # даты есть — модели нечего выдумывать
 
 
 def test_too_late(session, store, cfg):
@@ -179,3 +179,25 @@ def test_agent_step_limit(cfg, session):
     a = Agent(cfg, session, provider=Looping())
     assert "лимит шагов" in a.ask("привет")
     assert sum(m["role"] == "tool" for m in a.messages) == 3
+
+
+# --- harness сам повторяет чтение при сбое, действие — нет ----------------
+def test_harness_retries_read_once(cfg, session):
+    tools.FAULTS["get_country_metrics"] = ["timeout"]
+    a = Agent(cfg, session, provider=MockProvider())
+    answer = a.ask("Какие сроки по Франции?")
+    assert "медиана" in answer and not tools.FAULTS["get_country_metrics"]
+
+
+def test_period_only_allowed_values(session, store, cfg):
+    r = run("get_country_metrics", {"country": "IT", "period_days": 30}, session, store, cfg)
+    assert r["error"]["type"] == "validation"
+
+
+def test_dotenv_inline_comment(tmp_path, monkeypatch):
+    from visa_agent import config
+    env = tmp_path / ".env"
+    env.write_text("GIGACHAT_AUTH_KEY=abc==        # ключ из кабинета\n", encoding="utf-8")
+    monkeypatch.delenv("GIGACHAT_AUTH_KEY", raising=False)
+    config._load_dotenv(env)
+    assert config.os.environ["GIGACHAT_AUTH_KEY"] == "abc=="

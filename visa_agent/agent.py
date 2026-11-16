@@ -3,7 +3,9 @@ import json
 
 from .data import VisaStore
 from .providers import make_provider
-from .tools import Session, err, execute_tool, tool_specs
+from .tools import TOOLS, Session, err, execute_tool, tool_specs
+
+RETRYABLE = ("timeout", "unavailable", "rate_limit")
 
 SYSTEM = """Ты помощник по шенгенским визам для граждан России. Отвечай по-русски, коротко и по делу.
 Цифры (сроки, доли отказов) бери только из результатов инструментов и не придумывай. Указывай источник.
@@ -46,6 +48,12 @@ class Agent:
                           "Больше не повторяй, честно сообщи пользователю")
             else:
                 res = execute_tool(c["name"], c["arguments"], self.session, self.store, self.cfg, confirm)
+                # сбой сервиса при ЧТЕНИИ harness повторяет сам (действие — нет, только с ключом идемпотентности)
+                for _ in range(self.cfg["agent"].get("read_retries", 1)):
+                    if TOOLS.get(c["name"], {}).get("kind") != "read" or res.get("error", {}).get("type") not in RETRYABLE:
+                        break
+                    self.trace("retry", c["name"], res["error"]["type"])
+                    res = execute_tool(c["name"], c["arguments"], self.session, self.store, self.cfg, confirm)
             if "error" in res:
                 self._fails[c["name"]] = self._fails.get(c["name"], 0) + 1
             self.trace("tool", c["name"], c["arguments"], res)
@@ -54,7 +62,11 @@ class Agent:
 
     def _loop(self, confirm) -> str:
         for step in range(self.cfg["agent"]["max_steps"]):
-            out = self.provider.chat(self.messages, self.tools)
+            try:
+                out = self.provider.chat(self.messages, self.tools)
+            except Exception as e:  # noqa: BLE001 — модель недоступна: не падаем, честно говорим
+                self.trace("final", f"provider error: {e}")
+                return f"Модель сейчас недоступна ({type(e).__name__}): {str(e)[:200]}"
             calls = out.get("tool_calls") or []
             self.messages.append({"role": "assistant", "content": out.get("content"), "tool_calls": calls})
             if not calls:

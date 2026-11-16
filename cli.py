@@ -12,6 +12,8 @@ def trace(kind, *a):
     if kind == "model":
         for c in a[1]:
             print(f"  [шаг {a[0]}] модель → {c['name']}({json.dumps(c['arguments'], ensure_ascii=False)})")
+    elif kind == "retry":
+        print(f"  [harness] {a[0]} → {a[1]}, повторяю вызов сам (чтение можно повторить)")
     elif kind == "tool":
         r = a[2]
         short = f"ошибка {r['error']['type']}: {r['error']['message']}" if "error" in r else "ok"

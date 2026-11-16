@@ -15,7 +15,9 @@ openai:
 
 gigachat:
   scope: GIGACHAT_API_PERS
-  verify_ssl: false       # у GigaChat сертификат НУЦ Минцифры; true, если он установлен в системе
+  verify_ssl: false       # false | true | путь к russian_trusted_root_ca.pem (сертификат НУЦ Минцифры)
+  oauth_url: https://ngw.devices.sberbank.ru:9443/api/v2/oauth
+  api_url: https://gigachat.devices.sberbank.ru/api/v1   # если не работает — попробуйте https://api.giga.chat/v1
 
 agent:
   max_steps: 6            # лимит шагов цикла агента
